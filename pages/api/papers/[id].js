@@ -7,6 +7,31 @@ function canEditPaper(auth, paper) {
   return paper.createdBy.toString() === auth.userId;
 }
 
+function normalizeAuthors(authors) {
+  return Array.isArray(authors)
+    ? authors.map((a) => String(a).trim()).filter(Boolean)
+    : String(authors || "")
+        .split(",")
+        .map((a) => a.trim())
+        .filter(Boolean);
+}
+
+function normalizeJournalIds(journalIds) {
+  if (journalIds === undefined) return undefined;
+  if (Array.isArray(journalIds)) return journalIds.map(String).filter(Boolean);
+  const s = String(journalIds || "").trim();
+  if (!s) return [];
+  return [s];
+}
+
+function sameIdSet(a = [], b = []) {
+  const as = new Set(a.map(String));
+  const bs = new Set(b.map(String));
+  if (as.size !== bs.size) return false;
+  for (const x of as) if (!bs.has(x)) return false;
+  return true;
+}
+
 export default async function handler(req, res) {
   const auth = requireAuth(req, res);
   if (!auth) return;
@@ -17,32 +42,34 @@ export default async function handler(req, res) {
   const paper = await Paper.findById(id);
   if (!paper) return res.status(404).json({ message: "Paper not found" });
 
-  // PUT /api/papers/:id  (update title/authors/journalId)
   if (req.method === "PUT") {
     if (!canEditPaper(auth, paper)) {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    const { title, authors, journalId } = req.body || {};
+    const { title, authors, journalIds } = req.body || {};
+    const now = new Date();
 
     if (title !== undefined) paper.title = String(title).trim();
 
     if (authors !== undefined) {
-      paper.authors = Array.isArray(authors)
-        ? authors.map((a) => String(a).trim()).filter(Boolean)
-        : String(authors || "")
-            .split(",")
-            .map((a) => a.trim())
-            .filter(Boolean);
+      paper.authors = normalizeAuthors(authors);
     }
 
-    if (journalId !== undefined) paper.journalId = journalId;
+    const nextJournalIds = normalizeJournalIds(journalIds);
+    if (nextJournalIds !== undefined) {
+      const prev = Array.isArray(paper.journalIds) ? paper.journalIds.map(String) : [];
+      if (!sameIdSet(prev, nextJournalIds)) {
+        paper.journalIds = nextJournalIds;
+        paper.date_lastupdated = now;
+      }
+    }
 
+    paper.date_lastupdated = now;
     await paper.save();
     return res.status(200).json(paper);
   }
 
-  // PATCH /api/papers/:id/status (admin only)
   if (req.method === "PATCH") {
     if (auth.role !== "admin") {
       return res.status(403).json({ message: "Forbidden (admin only)" });
@@ -55,18 +82,21 @@ export default async function handler(req, res) {
       return res.status(400).json({ message: "Invalid status" });
     }
 
+    const now = new Date();
     paper.current_status = current_status;
+    paper.date_lastupdated = now;
+
     await paper.save();
     return res.status(200).json(paper);
   }
 
-  // DELETE /api/papers/:id (soft delete)
   if (req.method === "DELETE") {
     if (!canEditPaper(auth, paper)) {
       return res.status(403).json({ message: "Forbidden" });
     }
 
     paper.is_deleted = true;
+    paper.date_lastupdated = new Date();
     await paper.save();
     return res.status(200).json({ message: "Soft deleted" });
   }
