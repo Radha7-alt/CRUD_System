@@ -1,5 +1,15 @@
+// pages/papers.js
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
+import * as XLSX from "xlsx";
+
+const STATUS_OPTIONS = [
+  { value: "submitted", label: "Submitted" },
+  { value: "under_review", label: "Under review" },
+  { value: "revision_submitted", label: "Revision submitted" },
+  { value: "rejected", label: "Rejected" },
+  { value: "accepted", label: "Accepted" },
+];
 
 export default function PapersPage() {
   const router = useRouter();
@@ -8,17 +18,20 @@ export default function PapersPage() {
   const [journals, setJournals] = useState([]);
   const [papers, setPapers] = useState([]);
 
-  const [form, setForm] = useState({
-    title: "",
-    journalIds: [],
-  });
-
   const [editingId, setEditingId] = useState(null);
   const [msg, setMsg] = useState("");
 
   const [search, setSearch] = useState("");
 
-  const [authorsList, setAuthorsList] = useState([]);
+  // Form fields
+  const [title, setTitle] = useState("");
+  const [url, setUrl] = useState("");
+
+  // initial journal submission (single)
+  const [journalId, setJournalId] = useState("");
+
+  // Authors as objects
+  const [authors, setAuthors] = useState([]); // [{name,isCorresponding}]
   const [authorQuery, setAuthorQuery] = useState("");
   const [authorSuggestions, setAuthorSuggestions] = useState([]);
   const [authorOpen, setAuthorOpen] = useState(false);
@@ -40,15 +53,13 @@ export default function PapersPage() {
   async function loadJournals() {
     const res = await fetch("/api/journals");
     const data = await res.json();
-    setJournals(Array.isArray(data) ? data : []);
-    setForm((f) => {
-      const first = data?.[0]?._id || "";
-      const hasAny = Array.isArray(f.journalIds) && f.journalIds.length > 0;
-      return {
-        ...f,
-        journalIds: hasAny ? f.journalIds : first ? [first] : [],
-      };
-    });
+    const list = Array.isArray(data) ? data : [];
+    setJournals(list);
+
+    // default selection (first journal)
+    if (!journalId && list?.[0]?._id) {
+      setJournalId(String(list[0]._id));
+    }
   }
 
   async function loadPapers() {
@@ -59,42 +70,37 @@ export default function PapersPage() {
 
   useEffect(() => {
     (async () => {
-      await loadMe();
+      const user = await loadMe();
+      if (!user) return;
       await loadJournals();
       await loadPapers();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // author suggestions (from users)
   useEffect(() => {
     let ignore = false;
-
     (async () => {
       const q = authorQuery.trim();
       if (!q) {
         setAuthorSuggestions([]);
         return;
       }
-
       const res = await fetch(`/api/users/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
-
-      if (!ignore) {
-        setAuthorSuggestions(Array.isArray(data) ? data : []);
-      }
+      if (!ignore) setAuthorSuggestions(Array.isArray(data) ? data : []);
     })();
-
     return () => {
       ignore = true;
     };
   }, [authorQuery]);
 
+  // close suggestions on outside click
   useEffect(() => {
     function onDocMouseDown(e) {
       if (!authorWrapRef.current) return;
-      if (!authorWrapRef.current.contains(e.target)) {
-        setAuthorOpen(false);
-      }
+      if (!authorWrapRef.current.contains(e.target)) setAuthorOpen(false);
     }
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
@@ -103,12 +109,26 @@ export default function PapersPage() {
   function addAuthor(name) {
     const clean = (name || "").trim();
     if (!clean) return;
-    if (authorsList.some((a) => a.toLowerCase() === clean.toLowerCase())) return;
-    setAuthorsList((prev) => [...prev, clean]);
+
+    if (authors.some((a) => a.name.toLowerCase() === clean.toLowerCase())) return;
+
+    // first author default corresponding
+    setAuthors((prev) => [...prev, { name: clean, isCorresponding: prev.length === 0 }]);
   }
 
   function removeAuthor(name) {
-    setAuthorsList((prev) => prev.filter((a) => a !== name));
+    setAuthors((prev) => {
+      const next = prev.filter((a) => a.name !== name);
+      // ensure at least one corresponding if any authors remain
+      if (next.length && !next.some((a) => a.isCorresponding)) {
+        next[0] = { ...next[0], isCorresponding: true };
+      }
+      return next;
+    });
+  }
+
+  function setCorresponding(name) {
+    setAuthors((prev) => prev.map((a) => ({ ...a, isCorresponding: a.name === name })));
   }
 
   function addFromInput() {
@@ -121,20 +141,41 @@ export default function PapersPage() {
     setTimeout(() => authorInputRef.current?.focus(), 0);
   }
 
+  function resetForm() {
+    setEditingId(null);
+    setTitle("");
+    setUrl("");
+    setAuthors([]);
+    setAuthorQuery("");
+    setAuthorSuggestions([]);
+    setAuthorOpen(false);
+    setMsg("");
+  }
+
   async function submitPaper(e) {
     e.preventDefault();
     setMsg("");
 
+    if (!title.trim()) {
+      setMsg("Title is required.");
+      return;
+    }
+    if (!journalId) {
+      setMsg("Please select a journal.");
+      return;
+    }
+
     const payload = {
-      title: form.title,
-      journalIds: form.journalIds,
-      authors: authorsList,
+      title: title.trim(),
+      url: url || "",
+      authors, // [{name,isCorresponding}]
+      journalId,
     };
 
-    const url = editingId ? `/api/papers/${editingId}` : "/api/papers";
+    const endpoint = editingId ? `/api/papers/${editingId}` : "/api/papers";
     const method = editingId ? "PUT" : "POST";
 
-    const res = await fetch(url, {
+    const res = await fetch(endpoint, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -147,30 +188,26 @@ export default function PapersPage() {
     }
 
     setMsg(editingId ? "Paper updated!" : "Paper created!");
-    const first = journals?.[0]?._id || "";
-    setForm({ title: "", journalIds: first ? [first] : [] });
-    setAuthorsList([]);
-    setAuthorQuery("");
-    setAuthorSuggestions([]);
-    setAuthorOpen(false);
-    setEditingId(null);
+    resetForm();
     await loadPapers();
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function startEdit(p) {
     setEditingId(p._id);
+    setTitle(p.title || "");
+    setUrl(p.url || "");
+    setAuthors(Array.isArray(p.authors) ? p.authors : []);
 
-    const ids =
-      Array.isArray(p.journalIds) && p.journalIds.length
-        ? p.journalIds.map((j) => (typeof j === "string" ? j : j?._id)).filter(Boolean)
-        : [];
+    const last =
+      Array.isArray(p.journalHistory) && p.journalHistory.length
+        ? p.journalHistory[p.journalHistory.length - 1]
+        : null;
 
-    setForm({
-      title: p.title || "",
-      journalIds: ids.length ? ids : journals?.[0]?._id ? [journals[0]._id] : [],
-    });
+    if (last?.journalId?._id) setJournalId(String(last.journalId._id));
+    else if (last?.journalId) setJournalId(String(last.journalId));
+    else if (!journalId && journals?.[0]?._id) setJournalId(String(journals[0]._id));
 
-    setAuthorsList(p.authors || []);
     setMsg("");
     setAuthorQuery("");
     setAuthorSuggestions([]);
@@ -188,16 +225,7 @@ export default function PapersPage() {
       return;
     }
 
-    if (editingId === id) {
-      const first = journals?.[0]?._id || "";
-      setEditingId(null);
-      setForm({ title: "", journalIds: first ? [first] : [] });
-      setAuthorsList([]);
-      setAuthorQuery("");
-      setAuthorSuggestions([]);
-      setAuthorOpen(false);
-    }
-
+    if (editingId === id) resetForm();
     await loadPapers();
   }
 
@@ -206,68 +234,67 @@ export default function PapersPage() {
     router.push("/login");
   }
 
+  // helper: last journal entry
+  function getLastJournalEntry(p) {
+    const hist = Array.isArray(p.journalHistory) ? p.journalHistory : [];
+    return hist.length ? hist[hist.length - 1] : null;
+  }
+
+  // helper: display journal name for an entry
+  function getJournalName(entry) {
+    if (!entry) return "";
+    if (entry.journalId && typeof entry.journalId === "object" && entry.journalId.name) {
+      return entry.journalId.name;
+    }
+    return entry.journalTitle || "";
+  }
+
   const filteredPapers = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return papers;
 
     return papers.filter((p) => {
-      const title = (p.title || "").toLowerCase();
-      const authors = (p.authors || []).join(", ").toLowerCase();
-      const journalsText = (p.journalIds || [])
-        .map((j) => (typeof j === "string" ? j : j?.name || ""))
-        .join(", ")
-        .toLowerCase();
-      const status = (p.current_status || "").toLowerCase();
-
-      return title.includes(q) || authors.includes(q) || journalsText.includes(q) || status.includes(q);
+      const t = (p.title || "").toLowerCase();
+      const a = (p.authors || []).map((x) => x?.name || "").join(", ").toLowerCase();
+      const j = (p.journalHistory || []).map(getJournalName).join(", ").toLowerCase();
+      const s = (p.currentStatus || "").toLowerCase();
+      return t.includes(q) || a.includes(q) || j.includes(q) || s.includes(q);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [papers, search]);
 
-  function csvEscape(v) {
-    const s = String(v ?? "");
-    if (s.includes('"') || s.includes(",") || s.includes("\n")) {
-      return `"${s.replace(/"/g, '""')}"`;
-    }
-    return s;
+  function exportExcel(rows) {
+    const data = (rows || []).map((p) => {
+      const last = getLastJournalEntry(p);
+      const status = p.currentStatus || last?.status || "";
+
+      const authorObjs = Array.isArray(p.authors) ? p.authors : [];
+      const corresponding = authorObjs.find((a) => a?.isCorresponding)?.name || "";
+      const allAuthors = authorObjs.map((a) => a?.name).filter(Boolean).join(", ");
+
+      const journalNames = (p.journalHistory || [])
+        .map(getJournalName)
+        .filter(Boolean)
+        .join(" -> ");
+
+      return {
+        Title: p.title || "",
+        URL: p.url || "",
+        Corresponding: corresponding,
+        Authors: allAuthors,
+        Journals: journalNames,
+        Status: status,
+        "Last Updated": last?.last_updated ? new Date(last.last_updated).toLocaleString() : "",
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Papers");
+
+    const filename = `papers_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, filename);
   }
-
-  function exportCSV(rows) {
-    const header = ["Title", "Authors", "Journals", "Status", "Last Updated"];
-    const lines = [
-      header.join(","),
-      ...rows.map((p) => {
-        const journalNames = (p.journalIds || [])
-          .map((j) => (typeof j === "string" ? j : j?.name))
-          .filter(Boolean)
-          .join("; ");
-
-
-        const row = [
-          csvEscape(p.title),
-          csvEscape((p.authors || []).join("; ")),
-          csvEscape(journalNames),
-          csvEscape(p.current_status || ""),
-          csvEscape(p.date_lastupdated ? new Date(p.date_lastupdated).toISOString() : ""),
-        ];
-        return row.join(",");
-      }),
-    ];
-
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `papers_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-
-    URL.revokeObjectURL(url);
-  }
-
-  const selectedJournalNames = useMemo(() => {
-    const map = new Map(journals.map((j) => [String(j._id), j.name]));
-    return (form.journalIds || []).map((id) => map.get(String(id)) || id);
-  }, [form.journalIds, journals]);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-300 p-6">
@@ -290,13 +317,6 @@ export default function PapersPage() {
 
             <div className="flex flex-wrap gap-3">
               <button
-                onClick={() => router.push("/dashboard")}
-                className="rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 px-5 py-2.5 font-semibold shadow-sm transition"
-              >
-                Dashboard
-              </button>
-
-              <button
                 onClick={logout}
                 className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 font-semibold shadow-md transition"
               >
@@ -306,17 +326,15 @@ export default function PapersPage() {
           </div>
         </header>
 
+        {/* FORM */}
         <section className="mt-6 rounded-3xl bg-white/80 backdrop-blur-xl shadow-xl border border-white/40 p-7">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h2 className="text-xl font-semibold text-slate-900">
-                {editingId ? "Update paper" : "Add paper"}
-              </h2>
+              <h2 className="text-xl font-semibold text-slate-900">{editingId ? "Update paper" : "Add paper"}</h2>
               <p className="mt-1 text-sm text-slate-600">
-                Title and at least one journal are required. Authors can be selected from users or typed manually.
+                Create a paper with its initial journal submission. Status starts as <b>submitted</b>.
               </p>
             </div>
-
             {editingId && (
               <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-amber-800 text-sm font-semibold">
                 Editing mode
@@ -331,22 +349,30 @@ export default function PapersPage() {
                 <input
                   className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   placeholder="Paper title"
-                  value={form.title}
-                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
                   required
                 />
               </div>
 
               <div>
-                <label className="text-sm font-medium text-slate-700">Journals</label>
+                <label className="text-sm font-medium text-slate-700">URL</label>
+                <input
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  placeholder="(optional)"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="text-sm font-medium text-slate-700">Initial Journal</label>
                 <select
-                  multiple
-                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 h-40"
-                  value={form.journalIds}
-                  onChange={(e) => {
-                    const vals = Array.from(e.target.selectedOptions, (opt) => opt.value);
-                    setForm({ ...form, journalIds: vals });
-                  }}
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  value={journalId}
+                  onChange={(e) => setJournalId(e.target.value)}
                   required
                 >
                   {journals.map((j) => (
@@ -355,34 +381,45 @@ export default function PapersPage() {
                     </option>
                   ))}
                 </select>
+              </div>
 
-                {!!selectedJournalNames.length && (
-                  <div className="mt-2 text-xs text-slate-600">
-                    Selected: <span className="font-semibold text-slate-800">{selectedJournalNames.join(", ")}</span>
+              <div className="text-sm text-slate-600 flex items-end">
+                <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 w-full">
+                  <div className="font-semibold text-slate-800">Note</div>
+                  <div className="mt-1">
+                    Later status updates (under review / revision / rejected / accepted) should update the <b>last</b>{" "}
+                    journal entry.
                   </div>
-                )}
-
-                <div className="mt-2 text-xs text-slate-600">
-                  Hold <span className="font-semibold">Ctrl</span> (Windows) / <span className="font-semibold">Cmd</span>{" "}
-                  (Mac) to select multiple journals.
                 </div>
               </div>
             </div>
 
+            {/* AUTHORS */}
             <div className="relative" ref={authorWrapRef}>
               <label className="text-sm font-medium text-slate-700">Authors</label>
 
               <div className="mt-2 flex flex-wrap gap-2">
-                {authorsList.map((a) => (
+                {authors.map((a) => (
                   <span
-                    key={a}
+                    key={a.name}
                     className="inline-flex items-center gap-2 rounded-full bg-blue-50 border border-blue-200 px-3 py-1 text-sm text-blue-900"
+                    title={a.isCorresponding ? "Corresponding author" : ""}
                   >
-                    {a}
+                    {a.name}
+                    {a.isCorresponding && <span className="text-xs font-semibold text-blue-700">(corresponding)</span>}
                     <button
                       type="button"
-                      onClick={() => removeAuthor(a)}
+                      onClick={() => setCorresponding(a.name)}
+                      className="text-xs rounded-full border border-blue-200 px-2 py-0.5 hover:bg-blue-100"
+                      title="Set as corresponding"
+                    >
+                      Set
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeAuthor(a.name)}
                       className="text-blue-700 hover:text-blue-900 font-bold"
+                      aria-label={`Remove ${a.name}`}
                     >
                       ×
                     </button>
@@ -394,7 +431,7 @@ export default function PapersPage() {
                 <input
                   ref={authorInputRef}
                   className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  placeholder="Type a name/email and press Enter to add (supports non-users too)"
+                  placeholder="Type a name/email and press Enter to add"
                   value={authorQuery}
                   onChange={(e) => {
                     setAuthorQuery(e.target.value);
@@ -406,9 +443,7 @@ export default function PapersPage() {
                       e.preventDefault();
                       addFromInput();
                     }
-                    if (e.key === "Escape") {
-                      setAuthorOpen(false);
-                    }
+                    if (e.key === "Escape") setAuthorOpen(false);
                   }}
                 />
 
@@ -449,15 +484,7 @@ export default function PapersPage() {
                 <>
                   <button
                     type="button"
-                    onClick={() => {
-                      setEditingId(null);
-                      const first = journals?.[0]?._id || "";
-                      setForm({ title: "", journalIds: first ? [first] : [] });
-                      setAuthorsList([]);
-                      setAuthorQuery("");
-                      setAuthorSuggestions([]);
-                      setAuthorOpen(false);
-                    }}
+                    onClick={resetForm}
                     className="rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 px-5 py-2.5 font-semibold shadow-sm transition"
                   >
                     Cancel
@@ -474,14 +501,11 @@ export default function PapersPage() {
               )}
             </div>
 
-            {msg && (
-              <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 text-sm text-blue-800">
-                {msg}
-              </div>
-            )}
+            {msg && <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 text-sm text-blue-800">{msg}</div>}
           </form>
         </section>
 
+        {/* LIST */}
         <section className="mt-6 rounded-3xl bg-white/80 backdrop-blur-xl shadow-xl border border-white/40 p-7">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center justify-between gap-4">
@@ -492,7 +516,8 @@ export default function PapersPage() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            {/* Search + Export button side-by-side */}
+            <div className="flex w-full sm:w-auto gap-3">
               <input
                 className="w-full sm:w-96 rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 placeholder="Search by title, author, journal, status…"
@@ -502,10 +527,12 @@ export default function PapersPage() {
 
               <button
                 type="button"
-                onClick={() => exportCSV(filteredPapers)}
-                className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 font-semibold shadow-md transition"
+                onClick={() => exportExcel(filteredPapers)}
+                disabled={!filteredPapers.length}
+                className="whitespace-nowrap rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 text-white px-5 py-3 font-semibold shadow-md transition"
+                title={filteredPapers.length ? "Export current search results" : "No rows to export"}
               >
-                Export CSV
+                Export Excel
               </button>
             </div>
           </div>
@@ -515,6 +542,8 @@ export default function PapersPage() {
               <thead className="bg-slate-50">
                 <tr className="text-left text-slate-700">
                   <th className="px-5 py-3 font-semibold">Title</th>
+                  <th className="px-5 py-3 font-semibold">Corresponding</th>
+                  <th className="px-5 py-3 font-semibold">Authors</th>
                   <th className="px-5 py-3 font-semibold">Journals</th>
                   <th className="px-5 py-3 font-semibold">Status</th>
                   <th className="px-5 py-3 font-semibold">Last Updated</th>
@@ -524,26 +553,45 @@ export default function PapersPage() {
 
               <tbody className="divide-y divide-slate-200">
                 {filteredPapers.map((p) => {
-                  const names = (p.journalIds || [])
-                    .map((j) => (typeof j === "string" ? "" : j?.name || ""))
-                    .filter(Boolean);
+                  const last = getLastJournalEntry(p);
+                  const status = p.currentStatus || last?.status || "—";
+                  const lastUpdated = last?.last_updated ? new Date(last.last_updated).toLocaleString() : "—";
+                  const journalNames = (p.journalHistory || []).map(getJournalName).filter(Boolean);
+
+                  const authorObjs = Array.isArray(p.authors) ? p.authors : [];
+                  const corresponding = authorObjs.find((a) => a?.isCorresponding)?.name || "—";
+                  const allAuthors = authorObjs.map((a) => a?.name).filter(Boolean).join(", ") || "—";
+
                   return (
                     <tr key={p._id} className="hover:bg-slate-50">
                       <td className="px-5 py-4">
                         <div className="font-semibold text-slate-900">{p.title}</div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          Authors: {(p.authors || []).join(", ") || "—"}
-                        </div>
+                        {p.url ? (
+                          <div className="mt-1 text-xs">
+                            <a className="text-blue-700 hover:underline" href={p.url} target="_blank" rel="noreferrer">
+                              Open URL
+                            </a>
+                          </div>
+                        ) : (
+                          <div className="mt-1 text-xs text-slate-500">URL: —</div>
+                        )}
                       </td>
-                      <td className="px-5 py-4 text-slate-800">{names.length ? names.join(", ") : "—"}</td>
+
+                      <td className="px-5 py-4 text-slate-800">{corresponding}</td>
+                      <td className="px-5 py-4 text-slate-800">{allAuthors}</td>
+
+                      <td className="px-5 py-4 text-slate-800">
+                        {journalNames.length ? journalNames.join(" → ") : "—"}
+                      </td>
+
                       <td className="px-5 py-4">
                         <span className="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-blue-800 font-semibold">
-                          {p.current_status}
+                          {status}
                         </span>
                       </td>
-                      <td className="px-5 py-4 text-slate-700">
-                        {p.date_lastupdated ? new Date(p.date_lastupdated).toLocaleString() : "—"}
-                      </td>
+
+                      <td className="px-5 py-4 text-slate-700">{lastUpdated}</td>
+
                       <td className="px-5 py-4">
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -566,7 +614,7 @@ export default function PapersPage() {
 
                 {!filteredPapers.length && (
                   <tr>
-                    <td colSpan="5" className="px-5 py-10 text-center text-slate-600">
+                    <td colSpan="7" className="px-5 py-10 text-center text-slate-600">
                       No papers match your search.
                     </td>
                   </tr>
@@ -574,43 +622,9 @@ export default function PapersPage() {
               </tbody>
             </table>
           </div>
-
-          {me?.role === "admin" && (
-            <div className="mt-6 rounded-2xl bg-blue-50 border border-blue-100 p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h3 className="font-semibold text-blue-900">Admin tools</h3>
-                  <p className="text-sm text-blue-800">Manage statuses, journals, and users.</p>
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    onClick={() => router.push("/admin/papers")}
-                    className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 font-semibold shadow-md transition"
-                  >
-                    Paper Statuses
-                  </button>
-                  <button
-                    onClick={() => router.push("/journals")}
-                    className="rounded-xl bg-white hover:bg-blue-100 border border-blue-200 text-blue-900 px-5 py-2.5 font-semibold shadow-sm transition"
-                  >
-                    Journals
-                  </button>
-                  <button
-                    onClick={() => router.push("/admin/users")}
-                    className="rounded-xl bg-white hover:bg-blue-100 border border-blue-200 text-blue-900 px-5 py-2.5 font-semibold shadow-sm transition"
-                  >
-                    Users
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </section>
 
-        <p className="mt-8 text-center text-xs text-slate-600">
-          Built with React, Next.js, MongoDB, and Tailwind CSS
-        </p>
+        <p className="mt-8 text-center text-xs text-slate-600">Built with React, Next.js, MongoDB, and Tailwind CSS</p>
       </div>
     </main>
   );

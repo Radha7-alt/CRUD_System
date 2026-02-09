@@ -1,28 +1,51 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 
-const STATUSES = ["submitted", "under_review", "rejected", "accepted"];
+const STATUSES = ["submitted", "under_review", "revision_submitted", "rejected", "accepted"];
 
 function statusClasses(status) {
   if (status === "accepted") return "bg-green-100 text-green-800";
   if (status === "rejected") return "bg-red-100 text-red-800";
   if (status === "under_review") return "bg-amber-100 text-amber-800";
+  if (status === "revision_submitted") return "bg-purple-100 text-purple-800";
   return "bg-blue-100 text-blue-800";
+}
+
+function getLastEntry(p) {
+  const hist = Array.isArray(p.journalHistory) ? p.journalHistory : [];
+  return hist.length ? hist[hist.length - 1] : null;
+}
+
+function getJournalName(entry) {
+  if (!entry) return "—";
+  if (entry.journalId && typeof entry.journalId === "object" && entry.journalId.name) return entry.journalId.name;
+  return entry.journalTitle || "—";
 }
 
 export default function AdminPapersPage() {
   const router = useRouter();
   const [me, setMe] = useState(null);
   const [papers, setPapers] = useState([]);
+  const [journals, setJournals] = useState([]);
+
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [msg, setMsg] = useState("");
+
+  // For "add new journal submission" row controls
+  const [newJournalForPaper, setNewJournalForPaper] = useState({}); // { [paperId]: journalId }
 
   async function loadMe() {
     const res = await fetch("/api/auth/me");
     if (res.status === 401) return router.push("/login");
     const data = await res.json();
-    if (data.role !== "admin") return router.push("/dashboard");
+    if (data.role !== "admin") return router.push("/papers");
     setMe(data);
+  }
+
+  async function loadJournals() {
+    const res = await fetch("/api/journals");
+    const data = await res.json();
+    setJournals(Array.isArray(data) ? data : []);
   }
 
   async function loadPapers(deleted = includeDeleted) {
@@ -30,30 +53,64 @@ export default function AdminPapersPage() {
     const url = deleted ? "/api/papers?deleted=1" : "/api/papers";
     const res = await fetch(url);
     const data = await res.json();
-    setPapers(data);
+    setPapers(Array.isArray(data) ? data : []);
   }
 
   useEffect(() => {
     (async () => {
       await loadMe();
+      await loadJournals();
       await loadPapers(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function updateStatus(paperId, newStatus) {
+  async function updateLatestStatus(paperId, status) {
     setMsg("");
+
     const res = await fetch(`/api/papers/${paperId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ current_status: newStatus }),
+      body: JSON.stringify({ status }),
     });
+
     const data = await res.json();
     if (!res.ok) {
       setMsg(data.message || "Status update failed");
       return;
     }
+
     setMsg("Status updated.");
+    await loadPapers(includeDeleted);
+  }
+
+  async function addNewJournalSubmission(paperId) {
+    setMsg("");
+    const journalId = newJournalForPaper[paperId];
+
+    if (!journalId) {
+      setMsg("Pick a journal for the new submission first.");
+      return;
+    }
+
+    const res = await fetch(`/api/papers/${paperId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        addNewJournal: true,
+        journalId,
+        // journalTitle optional; backend stores blank; GET populates name anyway
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      setMsg(data.message || "Failed to add new submission");
+      return;
+    }
+
+    setMsg("New journal submission added.");
+    setNewJournalForPaper((prev) => ({ ...prev, [paperId]: "" }));
     await loadPapers(includeDeleted);
   }
 
@@ -65,9 +122,7 @@ export default function AdminPapersPage() {
   async function restorePaper(id) {
     if (!confirm("Restore this paper?")) return;
 
-    const res = await fetch(`/api/papers/${id}/restore`, {
-      method: "POST",
-    });
+    const res = await fetch(`/api/papers/${id}/restore`, { method: "POST" });
     const data = await res.json();
 
     if (!res.ok) {
@@ -78,6 +133,8 @@ export default function AdminPapersPage() {
     await loadPapers(includeDeleted);
   }
 
+  const total = useMemo(() => papers.length, [papers]);
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-300 p-6">
       <div className="mx-auto w-full max-w-6xl">
@@ -87,8 +144,7 @@ export default function AdminPapersPage() {
               <h1 className="text-3xl font-bold text-slate-900">Admin: Paper Statuses</h1>
               {me ? (
                 <p className="mt-1 text-slate-600">
-                  Logged in as{" "}
-                  <span className="font-semibold text-slate-900">{me.email}</span>
+                  Logged in as <span className="font-semibold text-slate-900">{me.email}</span>
                 </p>
               ) : (
                 <p className="mt-1 text-slate-600">Loading admin…</p>
@@ -130,8 +186,7 @@ export default function AdminPapersPage() {
 
             <div className="flex items-center gap-3">
               <span className="text-sm text-slate-600">
-                Total:{" "}
-                <span className="font-semibold text-slate-900">{papers.length}</span>
+                Total: <span className="font-semibold text-slate-900">{total}</span>
               </span>
               {msg && (
                 <span className="rounded-full bg-blue-50 border border-blue-200 px-3 py-1 text-sm text-blue-800">
@@ -147,73 +202,133 @@ export default function AdminPapersPage() {
                 <tr className="text-left text-slate-700">
                   <th className="px-5 py-3 font-semibold">Title</th>
                   <th className="px-5 py-3 font-semibold">Owner</th>
-                  <th className="px-5 py-3 font-semibold">Journal</th>
-                  <th className="px-5 py-3 font-semibold">Status</th>
-                  <th className="px-5 py-3 font-semibold">Deleted?</th>
+                  <th className="px-5 py-3 font-semibold">Latest Journal</th>
+                  <th className="px-5 py-3 font-semibold">Latest Status</th>
+                  <th className="px-5 py-3 font-semibold">Dates</th>
                   <th className="px-5 py-3 font-semibold">Update</th>
                 </tr>
               </thead>
 
               <tbody className="divide-y divide-slate-200">
-                {papers.map((p) => (
-                  <tr key={p._id} className="hover:bg-slate-50">
-                    <td className="px-5 py-4">
-                      <div className="font-semibold text-slate-900">{p.title}</div>
-                      <div className="mt-1 text-xs text-slate-600">
-                        Authors: {(p.authors || []).join(", ") || "—"}
-                      </div>
-                    </td>
+                {papers.map((p) => {
+                  const last = getLastEntry(p);
+                  const latestStatus = p.currentStatus || last?.status || "—";
+                  const latestJournal = getJournalName(last);
 
-                    <td className="px-5 py-4 text-slate-800">{p.createdBy?.email || "—"}</td>
-                    <td className="px-5 py-4 text-slate-800">{p.journalId?.name || "—"}</td>
+                  const submitted = last?.date_submitted ? new Date(last.date_submitted).toLocaleDateString() : "—";
+                  const updated = last?.last_updated ? new Date(last.last_updated).toLocaleDateString() : "—";
 
-                    <td className="px-5 py-4">
-                      <span
-                        className={`inline-flex items-center rounded-full px-3 py-1 font-semibold ${statusClasses(
-                          p.current_status
-                        )}`}
-                      >
-                        {p.current_status}
-                      </span>
-                    </td>
+                  const authorsText = (p.authors || [])
+                    .map((a) => (a?.isCorresponding ? `${a.name}*` : a?.name))
+                    .filter(Boolean)
+                    .join(", ");
 
-                    <td className="px-5 py-4">
-                      <span
-                        className={`inline-flex items-center rounded-full px-3 py-1 font-semibold ${
-                          p.is_deleted ? "bg-slate-200 text-slate-700" : "bg-emerald-100 text-emerald-800"
-                        }`}
-                      >
-                        {p.is_deleted ? "yes" : "no"}
-                      </span>
-                    </td>
+                  return (
+                    <tr key={p._id} className="hover:bg-slate-50 align-top">
+                      <td className="px-5 py-4">
+                        <div className="font-semibold text-slate-900">{p.title}</div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          Authors: {authorsText || "—"} {authorsText ? <span className="ml-1">( * corresponding )</span> : null}
+                        </div>
+                      </td>
 
-                    <td className="px-5 py-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <select
-                          className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
-                          value={p.current_status}
-                          onChange={(e) => updateStatus(p._id, e.target.value)}
-                          disabled={p.is_deleted}
-                        >
-                          {STATUSES.map((s) => (
-                            <option key={s} value={s}>
-                              {s}
-                            </option>
-                          ))}
-                        </select>
+                      <td className="px-5 py-4 text-slate-800">{p.createdBy?.email || "—"}</td>
 
-                        {p.is_deleted && (
-                          <button
-                            onClick={() => restorePaper(p._id)}
-                            className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 font-semibold shadow-sm transition"
+                      <td className="px-5 py-4 text-slate-800">{latestJournal}</td>
+
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex items-center rounded-full px-3 py-1 font-semibold ${statusClasses(latestStatus)}`}>
+                          {latestStatus}
+                        </span>
+                      </td>
+
+                      <td className="px-5 py-4 text-slate-700">
+                        <div className="text-xs">
+                          <div><span className="font-semibold">submitted:</span> {submitted}</div>
+                          <div><span className="font-semibold">updated:</span> {updated}</div>
+                        </div>
+
+                        <div className="mt-2">
+                          <span
+                            className={`inline-flex items-center rounded-full px-3 py-1 font-semibold ${
+                              p.is_deleted ? "bg-slate-200 text-slate-700" : "bg-emerald-100 text-emerald-800"
+                            }`}
                           >
-                            Restore
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                            {p.is_deleted ? "deleted" : "active"}
+                          </span>
+
+                          {p.is_deleted && (
+                            <button
+                              onClick={() => restorePaper(p._id)}
+                              className="ml-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-xs font-semibold shadow-sm transition"
+                            >
+                              Restore
+                            </button>
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <div className="flex flex-col gap-2">
+                          {/* Update latest status */}
+                          <select
+                            className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
+                            value={latestStatus}
+                            onChange={(e) => updateLatestStatus(p._id, e.target.value)}
+                            disabled={p.is_deleted}
+                          >
+                            {STATUSES.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+
+                          {/* Add new journal submission (after rejection, or anytime) */}
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                            <div className="text-xs font-semibold text-slate-700">Add new journal submission</div>
+                            <div className="mt-2 flex gap-2">
+                              <select
+                                className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
+                                value={newJournalForPaper[p._id] || ""}
+                                onChange={(e) =>
+                                  setNewJournalForPaper((prev) => ({ ...prev, [p._id]: e.target.value }))
+                                }
+                                disabled={p.is_deleted}
+                              >
+                                <option value="">Select journal…</option>
+                                {journals.map((j) => (
+                                  <option key={j._id} value={j._id}>
+                                    {j.name}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <button
+                                onClick={() => addNewJournalSubmission(p._id)}
+                                disabled={p.is_deleted}
+                                className="rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2 font-semibold shadow-sm transition"
+                                title={
+                                  latestStatus !== "rejected"
+                                    ? "You can add a new submission anytime, but typically after rejection."
+                                    : ""
+                                }
+                              >
+                                Add
+                              </button>
+                            </div>
+
+                            {latestStatus !== "rejected" && (
+                              <div className="mt-2 text-[11px] text-slate-600">
+                                Tip: usually used after status becomes <b>rejected</b>.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
 
                 {!papers.length && (
                   <tr>
@@ -227,13 +342,12 @@ export default function AdminPapersPage() {
           </div>
 
           <p className="mt-4 text-xs text-slate-600">
-            Note: Deleted papers can&apos;t be status-changed (dropdown disabled).
+            Status dropdown updates the <b>latest journal entry</b>. “Add new journal submission” pushes a new entry with
+            status <b>submitted</b>.
           </p>
         </section>
 
-        <p className="mt-8 text-center text-xs text-slate-600">
-          Built with React, Next.js, MongoDB, and Tailwind CSS
-        </p>
+        <p className="mt-8 text-center text-xs text-slate-600">Built with React, Next.js, MongoDB, and Tailwind CSS</p>
       </div>
     </main>
   );

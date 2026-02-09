@@ -7,24 +7,43 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [msg, setMsg] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function onSubmit(e) {
     e.preventDefault();
+    if (loading) return;
+
     setMsg("");
+    setLoading(true);
 
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
 
-    const data = await res.json();
-    if (!res.ok) {
-      setMsg(data.message || "Login failed");
-      return;
+      // In case the API returns non-JSON for some error
+      let data = {};
+      const text = await res.text();
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { message: text || "Login failed" };
+      }
+
+      if (!res.ok) {
+        setMsg(data.message || "Login failed");
+        return;
+      }
+
+      // Requirement 2: Redirect to papers page instead of dashboard
+      router.push("/papers");
+    } catch (err) {
+      setMsg("Network error. Please try again.");
+    } finally {
+      setLoading(false);
     }
-
-    router.push("/dashboard");
   }
 
   return (
@@ -37,33 +56,45 @@ export default function LoginPage() {
 
         <form onSubmit={onSubmit} className="mt-8 space-y-4">
           <div>
-            <label className="text-sm font-medium text-slate-700">Email</label>
+            <label className="text-sm font-medium text-slate-700" htmlFor="email">
+              Email
+            </label>
             <input
+              id="email"
               className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               placeholder="you@txstate.edu"
+              type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
+              required
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium text-slate-700">Password</label>
+            <label className="text-sm font-medium text-slate-700" htmlFor="password">
+              Password
+            </label>
             <input
+              id="password"
               className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               placeholder="••••••••"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
+              required
             />
           </div>
 
           <button
             type="submit"
-            className="w-full rounded-xl bg-blue-600 hover:bg-blue-700 text-white py-3 text-center text-base font-semibold shadow-md transition"
+            disabled={loading}
+            className={`w-full rounded-xl text-white py-3 text-center text-base font-semibold shadow-md transition ${
+              loading ? "bg-blue-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
+            }`}
           >
-            Sign in
+            {loading ? "Signing in..." : "Sign in"}
           </button>
 
           {msg && (
@@ -73,13 +104,11 @@ export default function LoginPage() {
           )}
         </form>
 
-        <div className="mt-6 flex items-center justify-between text-sm">
+        <div className="mt-6 flex items-center justify-start text-sm">
           <Link href="/" className="text-slate-600 hover:text-slate-900">
-            ← Back
+            ← Back to Home
           </Link>
-          <Link href="/register" className="text-blue-700 hover:text-blue-900 font-medium">
-            Create an account
-          </Link>
+          {/* Requirement 1: Removed the "Create an account" link */}
         </div>
       </div>
     </main>

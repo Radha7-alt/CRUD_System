@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 
 export default function JournalsPage() {
@@ -7,19 +7,21 @@ export default function JournalsPage() {
   const [journals, setJournals] = useState([]);
   const [name, setName] = useState("");
   const [msg, setMsg] = useState("");
+  const [search, setSearch] = useState("");
 
   async function loadMe() {
     const res = await fetch("/api/auth/me");
     if (res.status === 401) return router.push("/login");
+
     const data = await res.json();
-    if (data.role !== "admin") return router.push("/dashboard");
+    if (data.role !== "admin") return router.push("/papers"); // ✅ changed
     setMe(data);
   }
 
   async function loadJournals() {
     const res = await fetch("/api/journals");
     const data = await res.json();
-    setJournals(data);
+    setJournals(Array.isArray(data) ? data : []);
   }
 
   useEffect(() => {
@@ -34,10 +36,16 @@ export default function JournalsPage() {
     e.preventDefault();
     setMsg("");
 
+    const clean = name.trim();
+    if (!clean) {
+      setMsg("Journal name is required.");
+      return;
+    }
+
     const res = await fetch("/api/journals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name: clean }),
     });
 
     const data = await res.json();
@@ -55,10 +63,13 @@ export default function JournalsPage() {
     const newName = prompt("New journal name:", j.name);
     if (!newName) return;
 
+    const clean = newName.trim();
+    if (!clean) return;
+
     const res = await fetch(`/api/journals/${j._id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newName }),
+      body: JSON.stringify({ name: clean }),
     });
 
     const data = await res.json();
@@ -70,7 +81,8 @@ export default function JournalsPage() {
   }
 
   async function deleteJournal(j) {
-    if (!confirm(`Delete journal "${j.name}"?`)) return;
+    // Strong warning because papers may reference it
+    if (!confirm(`Delete journal "${j.name}"?\n\nWARNING: Existing papers may still reference this journal.`)) return;
 
     const res = await fetch(`/api/journals/${j._id}`, { method: "DELETE" });
     const data = await res.json();
@@ -86,6 +98,12 @@ export default function JournalsPage() {
     router.push("/login");
   }
 
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return journals;
+    return journals.filter((j) => (j.name || "").toLowerCase().includes(q));
+  }, [journals, search]);
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-300 p-6">
       <div className="mx-auto w-full max-w-5xl">
@@ -95,8 +113,7 @@ export default function JournalsPage() {
               <h1 className="text-3xl font-bold text-slate-900">Admin: Journals</h1>
               {me ? (
                 <p className="mt-1 text-slate-600">
-                  Logged in as{" "}
-                  <span className="font-semibold text-slate-900">{me.email}</span>
+                  Logged in as <span className="font-semibold text-slate-900">{me.email}</span>
                 </p>
               ) : (
                 <p className="mt-1 text-slate-600">Loading admin…</p>
@@ -120,18 +137,16 @@ export default function JournalsPage() {
           </div>
         </header>
 
+        {/* Add journal */}
         <section className="mt-6 rounded-3xl bg-white/80 backdrop-blur-xl shadow-xl border border-white/40 p-7">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h2 className="text-xl font-semibold text-slate-900">Add journal</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Add journals that users can select when submitting papers.
-              </p>
+              <p className="mt-1 text-sm text-slate-600">Add journals that users can select when submitting papers.</p>
             </div>
 
             <span className="text-sm text-slate-600">
-              Total:{" "}
-              <span className="font-semibold text-slate-900">{journals.length}</span>
+              Total: <span className="font-semibold text-slate-900">{journals.length}</span>
             </span>
           </div>
 
@@ -141,6 +156,7 @@ export default function JournalsPage() {
               onChange={(e) => setName(e.target.value)}
               placeholder="Journal name (e.g., IEEE Access)"
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              required
             />
             <button
               type="submit"
@@ -157,11 +173,23 @@ export default function JournalsPage() {
           )}
         </section>
 
+        {/* Journals list */}
         <section className="mt-6 rounded-3xl bg-white/80 backdrop-blur-xl shadow-xl border border-white/40 p-7">
-          <h2 className="text-xl font-semibold text-slate-900">Journals list</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Rename or delete journals. Deleting may affect existing papers that reference it.
-          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">Journals list</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Rename or delete journals. Deleting may affect existing papers that reference it.
+              </p>
+            </div>
+
+            <input
+              className="w-full sm:w-72 rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              placeholder="Search journals…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
 
           <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
             <table className="min-w-full text-sm">
@@ -173,7 +201,7 @@ export default function JournalsPage() {
               </thead>
 
               <tbody className="divide-y divide-slate-200">
-                {journals.map((j) => (
+                {filtered.map((j) => (
                   <tr key={j._id} className="hover:bg-slate-50">
                     <td className="px-5 py-4 font-semibold text-slate-900">{j.name}</td>
                     <td className="px-5 py-4">
@@ -195,10 +223,10 @@ export default function JournalsPage() {
                   </tr>
                 ))}
 
-                {!journals.length && (
+                {!filtered.length && (
                   <tr>
                     <td colSpan="2" className="px-5 py-10 text-center text-slate-600">
-                      No journals yet. Add your first journal above.
+                      No journals match your search.
                     </td>
                   </tr>
                 )}
@@ -207,9 +235,7 @@ export default function JournalsPage() {
           </div>
         </section>
 
-        <p className="mt-8 text-center text-xs text-slate-600">
-          Built with React, Next.js, MongoDB, and Tailwind CSS
-        </p>
+        <p className="mt-8 text-center text-xs text-slate-600">Built with React, Next.js, MongoDB, and Tailwind CSS</p>
       </div>
     </main>
   );

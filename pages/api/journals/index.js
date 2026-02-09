@@ -1,6 +1,6 @@
-import dbConnect from "../../../lib/mongodb";
-import Journal from "../../../models/Journal";
-import { requireAuth, requireAdmin } from "../../../lib/requireAuth";
+import dbConnect from "../../../lib/mongodb.js";
+import Journal from "../../../models/Journal.js";
+import { requireAuth, requireAdmin } from "../../../lib/requireAuth.js";
 
 export default async function handler(req, res) {
   await dbConnect();
