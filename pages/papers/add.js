@@ -43,7 +43,7 @@ export default function AddPaper() {
 
     const payload = {
       title: title.trim(),
-      url: "", // Requirement 3: Blank by default
+      url: "", 
       authors: authors,
       initialJournalId: selectedJournal,
       initialJournalTitle: journalData?.title || "Unknown Journal"
@@ -56,7 +56,7 @@ export default function AddPaper() {
     });
 
     if (res.ok) {
-      router.push("/papers"); // Requirement 2: Redirect to papers list
+      router.push("/papers"); 
     } else {
       const data = await res.json();
       setMsg(`❌ Error: ${data.message}`);

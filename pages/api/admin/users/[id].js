@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   if (req.method === "PUT") {
     const { email, role, password, name, orcid, address } = req.body || {};
 
-    // ✅ Only set fields that were actually provided
+    // Only set fields that were actually provided
     const updateData = {};
 
     if (name !== undefined) updateData.name = String(name).trim();
@@ -24,7 +24,7 @@ export default async function handler(req, res) {
     if (orcid !== undefined) updateData.orcid = String(orcid).trim();
     if (address !== undefined) updateData.address = String(address).trim();
 
-    // ✅ Optional password update
+    // Optional password update
     if (password !== undefined && String(password).length > 0) {
       if (String(password).length < 6) {
         return res.status(400).json({ message: "Password must be at least 6 characters" });
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
       const user = await User.findByIdAndUpdate(id, updateData, {
         new: true,
         runValidators: true,
-        select: "-passwordHash", // ✅ hide passwordHash
+        select: "-passwordHash", // hide passwordHash
       });
 
       if (!user) return res.status(404).json({ message: "User not found" });

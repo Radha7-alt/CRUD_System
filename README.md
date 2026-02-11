@@ -1,36 +1,135 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+DocuSwift
+🔗 **Live App:** https://crud-system-delta-six.vercel.app/
 
-## Getting Started
+AIT Lab Paper Management System
 
-First, run the development server:
+A full-stack research paper management platform built for internal use in the AIT Lab.
+This system streamlines the workflow of managing research papers, journal submissions, user access, review statuses, and admin operations — all with secure authentication and clean UI.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Built with Next.js, MongoDB, and Tailwind CSS.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+🚀 Features
+🔐 Authentication (Internal Use Only)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+    No public registration
+    Only admins can create/manage users
+    Authenticated users are redirected directly to the Papers page
+    Secure JWT-based login, logout, and role-based access control
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+📄 Paper Management
 
-## Learn More
+    Create, edit, and soft-delete papers
+    Automatically manages:
+    Title
+    URL
+    Authors (with corresponding author tagging)
+    Real-time author suggestions (autocomplete)
+    Full soft delete system:
+    Papers are archived, not removed
+    Admins can restore archived papers
+    Deleted papers are hidden from users unless “Show Deleted” is enabled
 
-To learn more about Next.js, take a look at the following resources:
+📝 Journal Submission Workflow
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+    Each paper maintains a chronological journal history, tracking the full lifecycle of submissions.
+    A journal record includes:
+    Journal ID & Title
+    Status (submitted, under_review, revision_submitted, rejected, accepted)
+    date_submitted
+    last_updated
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+✔ Submission Cycle Logic
 
-## Deploy on Vercel
+    Submit paper → creates first journal entry (submitted)
+    Status updates modify the latest journal entry
+    On rejection → add a new journal submission entry
+    The paper’s displayed status always reflects the latest journal’s status
+    This matches real-world academic submission cycles.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+👨‍💻 Admin Panel
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+    Admins have additional capabilities:
+
+👥 Manage Users
+
+    View all users
+    Update:
+    Password
+    Name
+    Email
+    Role
+    No public signup — admin-only user creation
+
+🧪 Paper Status Dashboard
+
+    View all papers
+    Enable/disable “Show Deleted” mode
+    Edit statuses
+    Add new journal submissions
+    Restore archived papers
+
+🧾 Activity Logs
+
+    Tracks:
+    User actions
+    Paper updates
+    Restores
+    Soft deletes
+    Journal modifications
+    (Logged with user ID, email, timestamps, and full before/after snapshots)
+
+🧭 Navigation
+
+A clean, fixed sidebar available on all pages:
+
+📄 Papers
+
+🧪 Paper Statuses
+
+📓 Journals
+
+👥 Manage Users (Admin only)
+
+🧾 Logs (Admin only)
+
+🔒 Logout
+The navigation is fully role-aware and context-aware.
+
+🛠 Tech Stack
+
+    Frontend: Next.js (Pages Router), React
+
+    Backend: Next.js API Routes
+
+    Database: MongoDB Atlas with Mongoose
+
+    Auth: JWT with HttpOnly cookies
+
+    UI: Tailwind CSS
+
+    Deployment: Vercel
+
+🧹 Soft Delete Philosophy
+
+    This project follows the real-world academic workflow:
+    No data is ever permanently removed
+    Papers can always be restored
+    Historical logs are preserved permanently
+    Journals and authors remain intact unless edited by admins
+
+🛡 Security Notes
+
+    Authenticated routes protected using requireAuth middleware
+    Cookies are HttpOnly & secure
+    User roles fully enforced on server side
+    No public registration → prevents unauthorized access
+
+🤝 Contributing
+
+    Because this is an internal research system, contributions are limited to the AIT Lab team.
+    For feature requests, bug reports, or improvements — contact the admin.
+
+📄 License
+
+    This project is for internal AIT Lab use only.
+    Do not distribute or deploy publicly.

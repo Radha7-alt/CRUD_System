@@ -18,7 +18,7 @@ export default function PaperStatusesPage() {
   const [msg, setMsg] = useState("");
   const [search, setSearch] = useState("");
 
-  // NEW: show deleted toggle
+  // show deleted toggle
   const [showDeleted, setShowDeleted] = useState(false);
 
   // per-row journal select
@@ -93,21 +93,16 @@ export default function PaperStatusesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
-
-      const data = await res.json().catch(() => ({}));
-
+      const data = await res.json();
       if (!res.ok) {
-        setMsg(data.message || `Failed (${res.status})`);
-        console.log("STATUS FAIL:", data);
+        setMsg(data.message || "Failed to update status");
         return;
       }
-
-      await loadPapers();
+      await loadPapers(showDeleted);
     } finally {
       setLoadingId("");
     }
   }
-
 
   async function addJournal(paperId) {
     setMsg("");
@@ -124,53 +119,36 @@ export default function PaperStatusesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ journalId }),
       });
-
-      const data = await res.json().catch(() => ({}));
-
+      const data = await res.json();
       if (!res.ok) {
-        setMsg(data.message || `Failed (${res.status})`);
-        console.log("ADD JOURNAL FAIL:", data);
+        setMsg(data.message || "Failed to add journal");
         return;
       }
-
       setAddJournalChoice((prev) => ({ ...prev, [paperId]: "" }));
-      await loadPapers();
+      await loadPapers(showDeleted);
     } finally {
       setLoadingId("");
     }
   }
 
-
-async function restorePaper(paperId) {
-  setMsg("");
-  setLoadingId(paperId);
-
-  try {
-    const res = await fetch(`/api/papers/${paperId}/restore`, { method: "POST" });
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      setMsg(data.message || "Failed to restore paper");
-      return;
+  // restore
+  async function restorePaper(paperId) {
+    setMsg("");
+    setLoadingId(paperId);
+    try {
+      const res = await fetch(`/api/papers/${paperId}/restore`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg(data.message || "Failed to restore paper");
+        return;
+      }
+      await loadPapers(showDeleted);
+    } finally {
+      setLoadingId("");
     }
-
-    // If we are in "Show deleted" mode, the list is meant to show deleted papers.
-    // So after restoring, removes it from the current table immediately.
-    if (showDeleted) {
-      setPapers((prev) => prev.filter((p) => p._id !== paperId));
-    } else {
-      // (This case usually won't happen because Restore button only shows for deleted,
-      // but keep it safe.)
-      setPapers((prev) =>
-        prev.map((p) => (p._id === paperId ? { ...p, is_deleted: false } : p))
-      );
-    }
-
-    await loadPapers(showDeleted);
-  } finally {
-    setLoadingId("");
   }
-}
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-300 p-6">
@@ -178,12 +156,12 @@ async function restorePaper(paperId) {
         <div className="rounded-3xl bg-white/80 backdrop-blur-xl shadow-xl border border-white/40 px-8 py-7">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-slate-900">Paper Statuses</h1>
+              <h1 className="text-3xl font-bold text-slate-900">Paper Status</h1>
               <p className="mt-1 text-slate-600">{me ? `Logged in as ${me.email || me.name}` : "Loading…"}</p>
             </div>
 
             <div className="flex items-center gap-3">
-              
+              {/* show deleted toggle */}
               <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                 <input
                   type="checkbox"
@@ -285,7 +263,7 @@ async function restorePaper(paperId) {
 
                       <td className="px-5 py-4">
                         <div className="grid gap-2">
-                          
+                          {/* status dropdown */}
                           <select
                             className="w-56 rounded-xl border border-slate-300 bg-white px-4 py-2 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
                             value={latestStatus}
@@ -299,7 +277,6 @@ async function restorePaper(paperId) {
                             ))}
                           </select>
 
-                          
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                             <div className="font-semibold text-slate-900 mb-2">Add new journal submission</div>
                             <div className="flex gap-2">
@@ -332,7 +309,7 @@ async function restorePaper(paperId) {
                             </div>
                           </div>
 
-                          {/*restore button only when archived */}
+                          {/* restore button only when archived */}
                           {isArchived && (
                             <button
                               onClick={() => restorePaper(p._id)}

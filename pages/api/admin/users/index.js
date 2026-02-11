@@ -45,7 +45,7 @@ export default async function handler(req, res) {
       passwordHash,
     });
 
-    // ✅ never send passwordHash back
+    // never send passwordHash back
     return res.status(201).json({
       _id: newUser._id,
       name: newUser.name,

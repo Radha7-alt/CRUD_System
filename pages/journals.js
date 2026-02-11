@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 
 export default function JournalsPage() {
   const router = useRouter();
+
   const [me, setMe] = useState(null);
   const [journals, setJournals] = useState([]);
   const [name, setName] = useState("");
@@ -12,9 +13,7 @@ export default function JournalsPage() {
   async function loadMe() {
     const res = await fetch("/api/auth/me");
     if (res.status === 401) return router.push("/login");
-
     const data = await res.json();
-    if (data.role !== "admin") return router.push("/papers"); // ✅ changed
     setMe(data);
   }
 
@@ -36,19 +35,13 @@ export default function JournalsPage() {
     e.preventDefault();
     setMsg("");
 
-    const clean = name.trim();
-    if (!clean) {
-      setMsg("Journal name is required.");
-      return;
-    }
-
     const res = await fetch("/api/journals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: clean }),
+      body: JSON.stringify({ name }),
     });
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setMsg(data.message || "Create failed");
       return;
@@ -63,81 +56,49 @@ export default function JournalsPage() {
     const newName = prompt("New journal name:", j.name);
     if (!newName) return;
 
-    const clean = newName.trim();
-    if (!clean) return;
-
     const res = await fetch(`/api/journals/${j._id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: clean }),
+      body: JSON.stringify({ name: newName }),
     });
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       alert(data.message || "Update failed");
       return;
     }
+
     await loadJournals();
   }
 
   async function deleteJournal(j) {
-    // Strong warning because papers may reference it
-    if (!confirm(`Delete journal "${j.name}"?\n\nWARNING: Existing papers may still reference this journal.`)) return;
+    if (!confirm(`Delete journal "${j.name}"?`)) return;
 
     const res = await fetch(`/api/journals/${j._id}`, { method: "DELETE" });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       alert(data.message || "Delete failed");
       return;
     }
-    await loadJournals();
-  }
 
-  async function logout() {
-    await fetch("/api/auth/logout");
-    router.push("/login");
+    await loadJournals();
   }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return journals;
-    return journals.filter((j) => (j.name || "").toLowerCase().includes(q));
+    return journals.filter((j) => String(j.name || "").toLowerCase().includes(q));
   }, [journals, search]);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-300 p-6">
       <div className="mx-auto w-full max-w-5xl">
+        {/* TOP header (NO logout/back/logged in) */}
         <header className="rounded-3xl bg-white/80 backdrop-blur-xl shadow-xl border border-white/40 px-8 py-7">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900">Admin: Journals</h1>
-              {me ? (
-                <p className="mt-1 text-slate-600">
-                  Logged in as <span className="font-semibold text-slate-900">{me.email}</span>
-                </p>
-              ) : (
-                <p className="mt-1 text-slate-600">Loading admin…</p>
-              )}
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={() => router.push("/papers")}
-                className="rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 px-5 py-2.5 font-semibold shadow-sm transition"
-              >
-                Back to Papers
-              </button>
-              <button
-                onClick={logout}
-                className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 font-semibold shadow-md transition"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
+          <h1 className="text-3xl font-bold text-slate-900">Journals</h1>
+          <p className="mt-1 text-slate-600 text-sm">{me ? "Manage your journals here." : "Loading…"}</p>
         </header>
 
-        {/* Add journal */}
         <section className="mt-6 rounded-3xl bg-white/80 backdrop-blur-xl shadow-xl border border-white/40 p-7">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -167,15 +128,12 @@ export default function JournalsPage() {
           </form>
 
           {msg && (
-            <div className="mt-4 rounded-2xl bg-blue-50 border border-blue-200 p-4 text-sm text-blue-800">
-              {msg}
-            </div>
+            <div className="mt-4 rounded-2xl bg-blue-50 border border-blue-200 p-4 text-sm text-blue-800">{msg}</div>
           )}
         </section>
 
-        {/* Journals list */}
         <section className="mt-6 rounded-3xl bg-white/80 backdrop-blur-xl shadow-xl border border-white/40 p-7">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-semibold text-slate-900">Journals list</h2>
               <p className="mt-1 text-sm text-slate-600">
@@ -226,7 +184,7 @@ export default function JournalsPage() {
                 {!filtered.length && (
                   <tr>
                     <td colSpan="2" className="px-5 py-10 text-center text-slate-600">
-                      No journals match your search.
+                      No journals found.
                     </td>
                   </tr>
                 )}

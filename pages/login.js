@@ -37,7 +37,6 @@ export default function LoginPage() {
         return;
       }
 
-      // Requirement 2: Redirect to papers page instead of dashboard
       router.push("/papers");
     } catch (err) {
       setMsg("Network error. Please try again.");
@@ -51,7 +50,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md rounded-3xl bg-white/80 backdrop-blur-xl shadow-xl border border-white/40 px-8 py-10">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-slate-900">Login</h1>
-          <p className="mt-2 text-slate-600">Welcome back! Sign in to continue.</p>
+          <p className="mt-2 text-slate-600">Sign in to continue.</p>
         </div>
 
         <form onSubmit={onSubmit} className="mt-8 space-y-4">
