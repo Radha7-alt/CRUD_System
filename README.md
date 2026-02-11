@@ -1,7 +1,7 @@
-DocuSwift
+**DocuSwift**
 🔗 **Live App:** https://crud-system-delta-six.vercel.app/
 
-AIT Lab Paper Management System
+**AIT Lab Paper Management System**
 
 A full-stack research paper management platform built for internal use in the AIT Lab.
 This system streamlines the workflow of managing research papers, journal submissions, user access, review statuses, and admin operations — all with secure authentication and clean UI.
